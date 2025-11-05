@@ -1,0 +1,97 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Virtualenv / envs
+venv/
+ENV/
+env/
+.venv/
+.ENV/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs and databases
+*.log
+*.sqlite3
+*.db
+
+# Model and data artifacts (often large) - ignore by default
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.ckpt
+models/
+artifacts/
+data/
+*.npz
+
+# Environment / secrets
+.env
+.env.*
+secrets.json
+credentials.json
+
+# Python bytecode
+*.pyc
+
+# Jupyter
+.ipynb_checkpoints
+
+# Windows
+ehthumbs.db
+Icon? 
+
+# Coverage and profiling
+.coverage
+coverage/
+
+# Misc
+*.bak
