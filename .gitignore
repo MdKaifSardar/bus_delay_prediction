@@ -62,8 +62,8 @@ Thumbs.db
 *.sqlite3
 *.db
 
-# Model and data artifacts (often large) - ignore by default
-*.pkl
+# Model and data artifacts (often large)
+# Keep large artifacts ignored by default, but tracking specific model files is allowed by removing/overriding these lines.
 *.joblib
 *.h5
 *.hdf5

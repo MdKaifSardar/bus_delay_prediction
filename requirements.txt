@@ -5,3 +5,4 @@ xgboost>=1.0.0
 scikit-learn>=0.24.0
 uvicorn>=0.21.0
 asgiref>=3.0.0
+# Optional: add other runtime deps here
