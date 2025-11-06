@@ -44,11 +44,18 @@ EXAMPLE_SINGLE = {
 
 @bp.route("/predict", methods=["POST"])
 def predict():
+    # Check readiness/loading state
     model = current_app.config.get("MODEL")
     load_error = current_app.config.get("LOAD_ERROR")
+    model_loaded = current_app.config.get("MODEL_LOADED", False)
 
-    if model is None:
-        return jsonify({"error": "Model not loaded", "details": load_error}), 500
+    if not model_loaded:
+        # If there was a load error, surface it as a 500; otherwise indicate loading.
+        if load_error:
+            current_app.logger.error("Predict requested but model failed to load: %s", load_error)
+            return jsonify({"error": "Model failed to load", "details": load_error}), 500
+        current_app.logger.info("Predict requested while model is still loading")
+        return jsonify({"error": "Model is still loading, try again shortly"}), 503
 
     try:
         payload = request.get_json(force=True)
@@ -64,7 +71,8 @@ def predict():
     except ValueError as e:
         return jsonify({"error": "Unsupported JSON format", "details": str(e)}), 400
     except Exception as e:
-        return jsonify({"error": "Prediction failed", "details": str(e)}), 500
+        current_app.logger.exception("Prediction failed: %s", e)
+        return jsonify({"error": "Prediction failed", "details": "Internal server error"}), 500
 
 
 @bp.route("/", methods=["GET"])
@@ -91,3 +99,15 @@ def index():
 @bp.route("/favicon.ico")
 def favicon():
     return "", 204
+
+
+@bp.route("/ready", methods=["GET"])
+def ready():
+    """Readiness probe: returns 200 when model is loaded, 503 otherwise."""
+    model_loaded = current_app.config.get("MODEL_LOADED", False)
+    load_error = current_app.config.get("LOAD_ERROR")
+    if model_loaded:
+        return jsonify({"ready": True}), 200
+    if load_error:
+        return jsonify({"ready": False, "error": load_error}), 500
+    return jsonify({"ready": False, "message": "model loading"}), 503
