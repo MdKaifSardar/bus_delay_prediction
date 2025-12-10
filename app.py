@@ -2,7 +2,7 @@
 
 This file is intentionally tiny: it imports create_app from the new
 `backend` package and runs the returned Flask application. The real logic is
-moved into `backend.model` and `backend.api` to keep things modular and easier
+moved into `backend.models` and `backend.api` to keep things modular and easier
 to test and extend.
 """
 

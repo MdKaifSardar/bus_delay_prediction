@@ -1,13 +1,14 @@
-"""Model utilities: loading and prediction helpers.
+"""Model loader and prediction helpers.
 
-This module centralizes model loading and DataFrame preparation so the web
-routes remain small and testable.
+This module contains the concrete model-loading logic and prediction helper
+functions. It's placed under `backend/utils` to centralize utility code. The
+public `backend.models` package re-exports the important symbols so callers
+don't need to change their imports.
 """
 from typing import Any, List, Optional
 import os
 import pickle
 import logging
-
 
 import pandas as pd
 import xgboost as xgb
@@ -26,12 +27,16 @@ def default_model_path() -> str:
 
     Priority:
     1. If the environment variable MODEL_PATH is set, use that.
-    2. Otherwise look for `best_xgb_model.pkl` one level above this package.
+    2. Otherwise look for `best_xgb_model.pkl` inside the sibling `models` folder.
     """
     env_path = os.environ.get("MODEL_PATH")
     if env_path:
         return os.path.abspath(env_path)
-    return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "best_xgb_model.pkl"))
+    # Default to `backend/models/best_xgb_model.pkl` so the model file
+    # is colocated with code that logically represents model artifacts.
+    return os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "models", "best_xgb_model.pkl")
+    )
 
 
 def load_model(path: str = None) -> Any:
@@ -80,55 +85,8 @@ def get_model(path: str = None, reload: bool = False) -> Any:
     if reload or _CACHED_MODEL is None:
         _CACHED_MODEL = load_model(path)
     return _CACHED_MODEL
-
-
-def _payload_to_dataframe(payload: Any, model: Any = None) -> pd.DataFrame:
-    """Convert incoming JSON payload to pandas.DataFrame and align columns.
-
-    payload may be a dict (single record) or a list of dicts (batch). If the
-    model exposes `feature_names_in_` the DataFrame will be reindexed to those
-    columns (missing columns will be NaN).
-    """
-    if isinstance(payload, dict):
-        # Distinguish between dict-of-scalars (single record) and dict-of-lists
-        if all(not isinstance(v, (list, tuple)) for v in payload.values()):
-            df = pd.DataFrame([payload])
-        else:
-            df = pd.DataFrame(payload)
-    elif isinstance(payload, list):
-        df = pd.DataFrame(payload)
-    else:
-        raise ValueError("Unsupported JSON format")
-
-    # Reindex to model's expected features if available
-    if model is not None and hasattr(model, "feature_names_in_"):
-        required = list(model.feature_names_in_)
-        df = df.reindex(columns=required)
-
-    # Try to coerce numeric-like values
-    try:
-        df = df.apply(pd.to_numeric, errors="ignore")
-    except Exception:
-        pass
-
-    return df
-
-
-def predict_with_model(model: Any, payload: Any) -> List[float]:
-    """Run prediction using the provided model and JSON payload.
-
-    Returns a plain Python list of predictions.
-    """
-    df = _payload_to_dataframe(payload, model=model)
-
-    # sklearn-like wrappers
-    if hasattr(model, "predict") and "Booster" not in type(model).__name__:
-        preds = model.predict(df)
-    else:
-        # assume raw xgboost.Booster
-        dmat = xgb.DMatrix(df)
-        preds = model.predict(dmat)
-
-    if hasattr(preds, "tolist"):
-        return preds.tolist()
-    return [float(preds)]
+# Prediction-related helpers were moved to `backend.utils.predict` to keep
+# the loader focused on model I/O. Importing here would cause a circular
+# dependency when re-exporting, so callers should import prediction helpers
+# from `backend.utils.predict` or from the `backend.models` compatibility
+# package which re-exports them.

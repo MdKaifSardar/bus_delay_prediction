@@ -1,162 +1,174 @@
-# Bus Delay Prediction API
+# Bus Delay Prediction Backend
 
-This repository implements a small Flask-based prediction service that wraps a pre-trained XGBoost model to predict bus delays for route segments.
+Production-ready Flask/ASGI service that wraps a pre-trained XGBoost model to predict bus delays for individual route segments. The project ships with a clean package layout, background model loading, readiness probes, Docker packaging, and deployment guidance.
 
-The code is organized as a minimal backend package (`backend`) and a tiny entrypoint (`app.py`). The heavy lifting (model loading and prediction) is contained in `backend/model.py` and the HTTP endpoints live in `backend/api.py`.
+## Features
+- **15-feature inference schema** with automatic column alignment and numeric coercion.
+- **Non-blocking startup**: the model loads in a background thread; `/ready` reports status.
+- **Universal prediction helper** works with sklearn wrappers or raw `xgboost.Booster`.
+- **ASGI + WSGI support**: develop with Flask, deploy with Uvicorn/Gunicorn.
+- **Container-first workflow**: Dockerfile + push-to-Docker-Hub instructions, ready for Render/Heroku/etc.
 
-## Quick overview
-- `app.py` — application entrypoint; constructs the Flask app via `backend.create_app()`.
-- `backend/__init__.py` — application factory (`create_app`) and background model loader.
-- `backend/model.py` — model-loading utilities and a `predict_with_model()` helper.
-- `backend/api.py` — Flask blueprint exposing `/predict`, `/ready`, and `/`.
-
-## Model (what the service expects)
-- Expected model file: `best_xgb_model.pkl` by default (one level above `backend/`).
-- You may override the location by setting the environment variable `MODEL_PATH` to an absolute path.
-- The service expects a pickled sklearn-like or XGBoost model. The loader will unpickle the model and, on prediction, will either call `model.predict(df)` (sklearn-like) or convert the input DataFrame to an `xgboost.DMatrix` and call `Booster.predict`.
-- The model should accept a pandas DataFrame with the following 15 features (names must match):
-
-  - segment_id
-  - distance_km
-  - avg_speed_kmph
-  - traffic_mean
-  - traffic_std
-  - traffic_max
-  - traffic_p90
-  - rain_intensity
-  - temperature_celsius
-  - visibility_km
-  - num_signals
-  - num_stops
-  - is_holiday
-  - day_of_week
-  - hour_of_day
-
-Ensure these columns exist and are typed appropriately (numeric where expected). If the model exposes `feature_names_in_`, the API will reindex incoming data to match.
-
-## API
-
-All requests and responses use JSON. The application exposes these endpoints:
-
-- `GET /` — basic info, lists required features and shows an example single-record body.
-- `GET /ready` — readiness probe. Returns 200 when the model is loaded; 503 while loading; 500 if loading failed.
-- `POST /predict` — run predictions. Accepts either a single JSON object (one record) or a list of objects (batch). Returns:
-
-```json
-{ "predictions": [ ... ] }
+## Repository Layout
+```
+app.py                 # Minimal Flask entrypoint
+asgi.py                # WSGI → ASGI adapter for Uvicorn
+backend/
+  __init__.py          # create_app + background loader
+  api/
+    __init__.py        # Blueprint wiring
+    index.py           # GET /
+    predict.py         # POST /predict
+    health.py          # GET /ready, favicon
+  models/
+    __init__.py        # Re-export utils loaders/predictors
+  services/
+    predict.py         # Service layer orchestration
+  utils/
+    loader.py          # Model path resolution + caching
+    predict.py         # DataFrame prep + prediction helpers
+    delay_prediction.py# Legacy import shim
+Dockerfile
+requirements.txt
 ```
 
-Example single-record request body:
+## Requirements
+- Python 3.11+
+- pipenv/venv recommended
+- Model artifact: `backend/models/best_xgb_model.pkl` (or set `MODEL_PATH`)
+- System libs: handled by Dockerfile (`build-essential`).
 
-```json
-{
-  "segment_id": 3,
-  "distance_km": 1.60,
-  "avg_speed_kmph": 30.03,
-  "traffic_mean": 1.48,
-  "traffic_std": 0.14,
-  "traffic_max": 1.82,
-  "traffic_p90": 1.70,
-  "rain_intensity": 2.53,
-  "temperature_celsius": 28.52,
-  "visibility_km": 6.07,
-  "num_signals": 0,
-  "num_stops": 2,
-  "is_holiday": 1,
-  "day_of_week": 6,
-  "hour_of_day": 13
-}
-```
+## Environment Variables
+| Name | Default | Purpose |
+|------|---------|---------|
+| `MODEL_PATH` | `backend/models/best_xgb_model.pkl` relative to repo | Override model location (absolute path recommended in prod). |
+| `PORT` | `8000` (Dockerfile) | Exposed port for Uvicorn. |
+| `FLASK_ENV` | `development` (optional) | Enables debug auto-reload when running `python app.py`. |
 
-Response example:
+## Local Development
+1. **Create & activate a virtualenv**
+   ```powershell
+   cd "E:\CSE\bus delay backend"
+   python -m venv .venv
+   .\.venv\Scripts\Activate.ps1
+   ```
+2. **Install dependencies**
+   ```powershell
+   pip install --upgrade pip
+   pip install -r requirements.txt
+   ```
+3. **Place the model** at `backend\models\best_xgb_model.pkl` or set `$env:MODEL_PATH`.
+4. **Run the dev server (WSGI)**
+   ```powershell
+   python app.py
+   ```
+   or run the ASGI stack (recommended):
+   ```powershell
+   uvicorn asgi:app --host 0.0.0.0 --port 5000
+   ```
+5. **Smoke-test**
+   ```powershell
+   Invoke-RestMethod `
+     -Uri "http://localhost:5000/predict" `
+     -Method Post `
+     -ContentType "application/json" `
+     -Body '{
+       "segment_id":3,
+       "distance_km":1.6,
+       "avg_speed_kmph":30.03,
+       "traffic_mean":1.48,
+       "traffic_std":0.14,
+       "traffic_max":1.82,
+       "traffic_p90":1.7,
+       "rain_intensity":2.53,
+       "temperature_celsius":28.52,
+       "visibility_km":6.07,
+       "num_signals":0,
+       "num_stops":2,
+       "is_holiday":1,
+       "day_of_week":6,
+       "hour_of_day":13
+     }'
+   ```
 
-```json
-{ "predictions": [12.3] }
-```
+## API Reference
+| Endpoint | Method | Description | Success Response |
+|----------|--------|-------------|------------------|
+| `/` | GET | Service metadata, feature list, example payload. | 200 JSON info. |
+| `/ready` | GET | Readiness probe. Returns 200 when the background loader finished. | `{ "ready": true }` or error details. |
+| `/predict` | POST | Accepts a JSON object or list of objects with the 15 features. | `{ "predictions": [float, ...] }` |
 
-HTTP status guidance:
-- `200` — success
-- `400` — bad request (invalid JSON / unsupported payload)
-- `503` — service not ready (model still loading)
-- `500` — internal error or model load failure
+**Prediction schema (required keys)**
+1. `segment_id`
+2. `distance_km`
+3. `avg_speed_kmph`
+4. `traffic_mean`
+5. `traffic_std`
+6. `traffic_max`
+7. `traffic_p90`
+8. `rain_intensity`
+9. `temperature_celsius`
+10. `visibility_km`
+11. `num_signals`
+12. `num_stops`
+13. `is_holiday`
+14. `day_of_week`
+15. `hour_of_day`
 
-## Deployment notes (Render)
+The service converts scalars/lists into a pandas `DataFrame`, reorders columns if the model exposes `feature_names_in_`, and coerces numerics per column.
 
-- The app includes a `Procfile` configured to run an ASGI server with Uvicorn (`uvicorn asgi:app --host 0.0.0.0 --port $PORT`). Ensure `uvicorn` and `asgiref` are in `requirements.txt` (they are).
-- The app starts quickly and loads the model in a background thread. Use the `/ready` endpoint as the readiness probe in your Render service settings to avoid routing traffic before the model is ready.
-- Model placement options:
-  1. Commit `best_xgb_model.pkl` into the repository (not recommended for large or sensitive models). If you choose this, add it and push.
-  2. Download the model during Render build (recommended). Configure a build command in Render that downloads the model to the project root, e.g.:
-
-```bash
-curl -fSL -o best_xgb_model.pkl "https://<your-storage>/best_xgb_model.pkl"
-```
-
-  3. Place the model on the instance and set `MODEL_PATH` to its absolute path.
-
-## Local development
-
-1. Create a virtualenv and install dependencies:
-
+## Docker Workflow
+Build locally:
 ```powershell
-pip install -r requirements.txt
+docker build -t bus-delay-backend:latest .
 ```
-
-2. Run the app locally (dev server):
-
+Run with baked-in model:
 ```powershell
-python app.py
-# or run via uvicorn (ASGI wrapper)
-uvicorn asgi:app --host 0.0.0.0 --port 8000
+docker run -p 8000:8000 --rm bus-delay-backend:latest
+```
+Run while mounting a model file:
+```powershell
+docker run -p 8000:8000 --rm \
+  -v "${PWD}\backend\models\best_xgb_model.pkl:/app/backend/models/best_xgb_model.pkl" \
+  -e MODEL_PATH=/app/backend/models/best_xgb_model.pkl \
+  bus-delay-backend:latest
+```
+Published image example:
+```powershell
+docker pull mdkaif001/bus-delay-backend:1.0.0
+docker run -p 8000:8000 --rm mdkaif001/bus-delay-backend:1.0.0
 ```
 
-3. Test readiness and prediction endpoints with `curl` or HTTP client.
+## Deployment Tips
+- **Render / Heroku**: use `uvicorn asgi:app --host 0.0.0.0 --port $PORT`. Point the health check to `/ready`.
+- **Model sourcing**:
+  1. Commit the `.pkl` (if allowed).
+  2. Download during build (`curl ... > backend/models/best_xgb_model.pkl`).
+  3. Mount at runtime + `MODEL_PATH`.
+- **XGBoost warning**: If you see the warning about serialized models, re-save the model using the same XGBoost version as production (`Booster.save_model`) or pin `xgboost==<training-version>` in `requirements.txt`.
 
-## Best practices & performance tips
-
-- Load the model at build time if possible so runtime startup is fast.
-- For high throughput, consider saving XGBoost in native format (`Booster.save_model`) or exporting to ONNX for faster inference.
-- Use batching for prediction when possible and consider a dedicated model-serving process if inference is the bottleneck.
-- Tune worker count based on memory; if using Gunicorn prefer `--preload` so the master loads the model and forks workers to take advantage of copy-on-write.
+## Verification & Testing
+- Lint / syntax check:
+  ```powershell
+  python -m compileall -q .
+  ```
+- Readiness:
+  ```powershell
+  curl http://localhost:5000/ready
+  ```
+- API contract tests can be added under `tests/` (not shipped yet). For quick manual validation, use the sample payload above.
 
 ## Troubleshooting
+- **/ready returns 500**: check container logs; `app.config['LOAD_ERROR']` stores the message (missing/corrupt model, permissions, etc.).
+- **/predict returns 503**: call again once `ready` becomes true.
+- **FutureWarning from XGBoost**: re-save the model or pin the package version as noted.
+- **Docker cannot connect to daemon**: ensure Docker Desktop (or another engine) is running before building.
 
-- If `/ready` returns 500, check logs for `LOAD_ERROR` details (application logs include unpickle and IO stack traces).
-- If predictions return NaN or fail, verify incoming JSON includes all required features and types.
+## Contributing
+Pull requests are welcome. Please include:
+1. Clear description of changes.
+2. Tests or manual verification notes (`curl /ready`, `/predict`).
+3. Updated documentation if behavior changes.
 
-## License & contributions
-
-This project is provided as-is. Contributions are welcome — open a PR with changes or improvements.
-# Flask XGBoost prediction API
-
-This small Flask app exposes a single POST endpoint `/predict` which accepts JSON data and returns predictions from an XGBoost model saved as `best_xgb_model.pkl` in the same directory.
-
-Files added:
-- `app.py` — Flask app with `/predict` endpoint.
-- `requirements.txt` — Python dependencies.
-- `sample_request.json` — example request body.
-
-Usage
-1. Install dependencies (prefer a virtualenv):
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-2. Place your trained model file named `best_xgb_model.pkl` into the project folder (same directory as `app.py`). The model may be either an sklearn-wrapped XGBoost model (XGBRegressor/XGBClassifier) or a raw `xgboost.Booster` object.
-
-3. Run the app:
-
-```powershell
-python app.py
-```
-
-4. Example request (single record) — `sample_request.json` contains a placeholder. Use curl or any HTTP client:
-
-```powershell
-curl -X POST http://127.0.0.1:5000/predict -H "Content-Type: application/json" -d @sample_request.json
-```
-
-Notes
-- The API attempts to align incoming JSON columns to the model's expected `feature_names_in_` if available. If columns are missing they'll be filled with NaN; if extra columns are present they'll be ignored.
-- Error responses return JSON with an `error` field and an optional `details` message.
+---
+Need help? Open an issue with logs, reproduction steps, and the payload you used.

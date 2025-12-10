@@ -2,7 +2,7 @@ from flask import Flask
 from threading import Thread
 from typing import Optional
 
-from .model import get_model
+from .models import get_model
 from .api import bp as api_bp
 
 
